@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Summary</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .history-list { margin-top: 2rem; }
+        .history-list li { font-size: 0.98rem; color: #64748b; }
+        .history-list .added { color: #22c55e; }
+        .history-list .deleted { color: #ef4444; }
+        .back-link { display: inline-block; margin-bottom: 1.5rem; color: #6366f1; text-decoration: none; font-weight: 600; }
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="back-link">&larr; Back to Add Expense</a>
+        <h1>Finance Dashboard</h1>
+        <h2 style="text-align:center;">Expenses List</h2>
+        <table id="expenses-table" style="width:100%;border-collapse:collapse;margin-bottom:1.5rem;">
+            <thead>
+                <tr style="background:#a5b4fc;">
+                    <th>Category</th>
+                    <th>Type</th>
+                    <th>Amount (₹)</th>
+                    <th>Date</th>
+                    <th>Quantity</th>
+                </tr>
+            </thead>
+            <tbody id="expenses-table-body"></tbody>
+            <tfoot>
+                <tr>
+                    <td style="font-weight:bold;">Total:</td>
+                    <td></td>
+                    <td id="expenses-table-total" style="font-weight:bold;"></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+        <div id="monthly-tracker"></div>
+        <h2>History</h2>
+        <div style="margin-bottom:1rem;display:flex;gap:1rem;flex-wrap:wrap;align-items:center;">
+            <label>Type:
+                <select id="filter-type">
+                    <option value="all">All</option>
+                    <option value="credit">Credit</option>
+                    <option value="debit">Debit</option>
+                </select>
+            </label>
+            <label>Month:
+                <select id="filter-month"></select>
+            </label>
+        </div>
+        <div id="history-table-container"></div>
+        <div style="margin:1.5rem 0;">
+            <button id="clear-history" style="background:#be123c;color:#fff;padding:0.5rem 1.2rem;border:none;border-radius:6px;font-weight:600;cursor:pointer;">Clear History</button>
+        </div>
+    </div>
+    <script>
+        const history = JSON.parse(localStorage.getItem('history')) || [];
+        const summaryContent = document.getElementById('summary-content');
+        const historyList = document.getElementById('history-list');
+
+        // Monthly tracker
+        function getMonthKey(dateStr) {
+            const d = new Date(dateStr);
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        }
+        const monthly = {};
+        JSON.parse(localStorage.getItem('expenses'))?.forEach(exp => {
+            const key = getMonthKey(exp.date);
+            if (!monthly[key]) monthly[key] = { credit: 0, debit: 0 };
+            const subtotal = parseFloat(exp.amount) * parseInt(exp.quantity);
+            if (exp.type === 'credit') monthly[key].credit += subtotal;
+            else monthly[key].debit += subtotal;
+        });
+        let monthlyHtml = '<table style="width:100%;margin-bottom:1.5rem;border-collapse:collapse;">';
+        monthlyHtml += '<tr><th style="text-align:left;">Month</th><th style="color:#22c55e;">Credited (₹)</th><th style="color:#ef4444;">Debited (₹)</th></tr>';
+        Object.entries(monthly).forEach(([month, vals]) => {
+            monthlyHtml += `<tr><td>${month}</td><td style="color:#22c55e;">₹${vals.credit.toFixed(2)}</td><td style="color:#ef4444;">₹${vals.debit.toFixed(2)}</td></tr>`;
+        });
+        monthlyHtml += '</table>';
+        document.getElementById('monthly-tracker').innerHTML = monthlyHtml;
+
+        let histHtml = '';
+        // Update history colors to deeper shades
+        history.slice().reverse().forEach(item => {
+            const actionClass = item.action === 'added' ? 'added' : 'deleted';
+            const sign = item.action === 'added' ? '+' : '-';
+            const subtotal = parseFloat(item.amount) * parseInt(item.quantity);
+            const typeLabel = item.type === 'credit' ? 'Credit' : 'Debit';
+            const typeColor = item.type === 'credit' ? '#059669' : '#b91c1c';
+            histHtml += `<li class="${actionClass}">${sign} <b style=\"color:${typeColor}\">${typeLabel}</b> ${item.date} - ${item.description} (x${item.quantity}): ₹${subtotal.toFixed(2)} <span style=\"font-size:0.85em;opacity:0.7;\">[${new Date(item.timestamp).toLocaleString()}]</span></li>`;
+        });
+        historyList.innerHTML = histHtml || '<li>No history yet.</li>';
+
+        // Filtering logic
+        function getUniqueMonths(history) {
+            const months = new Set();
+            history.forEach(item => months.add(getMonthKey(item.date)));
+            return Array.from(months).sort();
+        }
+        // Populate month dropdown with all months from history and expenses
+        function getUniqueMonthsFromAll() {
+            const months = new Set();
+            history.forEach(item => months.add(getMonthKey(item.date)));
+            JSON.parse(localStorage.getItem('expenses'))?.forEach(item => months.add(getMonthKey(item.date)));
+            return Array.from(months).filter(Boolean).sort();
+        }
+        const filterType = document.getElementById('filter-type');
+        const filterMonth = document.getElementById('filter-month');
+        function populateMonthDropdown() {
+            const months = getUniqueMonthsFromAll();
+            filterMonth.innerHTML = '<option value="all">All</option>' + months.map(m => `<option value="${m}">${m}</option>`).join('');
+        }
+        populateMonthDropdown();
+        function filterHistory() {
+            const type = filterType.value;
+            const month = filterMonth.value;
+            return history.filter(item =>
+                (type === 'all' || item.type === type) &&
+                (month === 'all' || getMonthKey(item.date) === month)
+            );
+        }
+        // Remove bar graph/chart.js and render a CSV-style table for history
+        function renderHistoryTable(filtered) {
+            if(filtered.length === 0) {
+                document.getElementById('history-table-container').innerHTML = '<div>No history yet.</div>';
+                return;
+            }
+            let table = '<table style="width:100%;border-collapse:collapse;font-size:1rem;">';
+            table += '<tr style="background:#f1f5f9;"><th>Name</th><th>Type</th><th>Date</th><th>Quantity</th><th>Amount (₹)</th><th>Subtotal (₹)</th><th>Action</th><th>Timestamp</th></tr>';
+            filtered.slice().reverse().forEach(item => {
+                const subtotal = parseFloat(item.amount) * parseInt(item.quantity);
+                const typeColor = item.type === 'credit' ? '#047857' : '#b91c1c';
+                const actionColor = item.action === 'added' ? '#2563eb' : '#be123c';
+                table += `<tr>
+                    <td>${item.description}</td>
+                    <td style="color:${typeColor};font-weight:600;">${item.type.charAt(0).toUpperCase() + item.type.slice(1)}</td>
+                    <td>${item.date}</td>
+                    <td>${item.quantity}</td>
+                    <td>₹${parseFloat(item.amount).toFixed(2)}</td>
+                    <td>₹${isNaN(subtotal) ? '0.00' : subtotal.toFixed(2)}</td>
+                    <td style="color:${actionColor};font-weight:600;">${item.action.charAt(0).toUpperCase() + item.action.slice(1)}</td>
+                    <td style="font-size:0.95em;opacity:0.7;">${new Date(item.timestamp).toLocaleString()}</td>
+                </tr>`;
+            });
+            table += '</table>';
+            document.getElementById('history-table-container').innerHTML = table;
+        }
+        // Always render the CSV-style table under History
+        function renderFilteredHistory() {
+            const filtered = filterHistory();
+            renderHistoryTable(filtered);
+        }
+        filterType.onchange = renderFilteredHistory;
+        filterMonth.onchange = renderFilteredHistory;
+        renderFilteredHistory();
+
+        // Clear history button logic
+        document.getElementById('clear-history').onclick = function() {
+            if(confirm('Are you sure you want to clear the history? This cannot be undone.')) {
+                localStorage.setItem('history', '[]');
+                renderExpensesTableSummary(); // Update expenses table after clearing history
+                location.reload();
+            }
+        };
+
+        // Render Expenses List table in summary page, always reading latest from localStorage
+        function renderExpensesTableSummary() {
+            const expenses = JSON.parse(localStorage.getItem('expenses')) || [];
+            const tbody = document.getElementById('expenses-table-body');
+            const totalCell = document.getElementById('expenses-table-total');
+            tbody.innerHTML = '';
+            let total = 0;
+            expenses.forEach((expense) => {
+                const subtotal = parseFloat(expense.amount) * parseInt(expense.quantity);
+                total += subtotal;
+                const typeLabel = expense.type === 'credit' ? 'Credit' : 'Debit';
+                const typeColor = expense.type === 'credit' ? '#059669' : '#b91c1c';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${expense.description}</td>
+                    <td style="color:${typeColor};font-weight:600;">${typeLabel}</td>
+                    <td>₹${subtotal.toFixed(2)}</td>
+                    <td>${expense.date}</td>
+                    <td>${expense.quantity}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            totalCell.textContent = `₹${total.toFixed(2)}`;
+        }
+        // Always re-render table on load, DOMContentLoaded, and focus
+        renderExpensesTableSummary();
+        window.addEventListener('focus', renderExpensesTableSummary);
+        document.addEventListener('DOMContentLoaded', renderExpensesTableSummary);
+        // Also update table after clearing history
+        document.getElementById('clear-history').onclick = function() {
+            if(confirm('Are you sure you want to clear the history? This cannot be undone.')) {
+                localStorage.setItem('history', '[]');
+                renderExpensesTableSummary();
+                location.reload();
+            }
+        };
+    </script>
+</body>
+</html> 
